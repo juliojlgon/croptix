@@ -1,66 +1,37 @@
-# CrOptix Privacy Policy
+# CrOptix fork privacy policy
 
-**Effective date: August 23, 2026**
+Effective date: November 1, 2026
 
-CrOptix is a browser extension that changes the Crunchyroll website and player. This policy describes data handled by the extension itself. Crunchyroll's own website, player, and services remain governed by Crunchyroll's privacy policy.
+This policy describes this fork's extension behavior. Crunchyroll's website and services have their own privacy policies.
 
-## Summary
+## Local preferences
 
-* CrOptix does not operate a server and does not collect analytics, advertising identifiers, or telemetry for the developer.
-* Extension settings are stored locally in the browser.
-* CrOptix uses the AniList API to provide AniList Trending data.
-* CrOptix does not sell personal data.
+Design changes and player enhancements are enabled by default. AniList Trending is disabled by default, including upgrades without an explicit AniList preference. Preferences are stored in the browser's local extension storage, not browser sync. The extension does not operate a developer server or add developer analytics.
 
-## Local extension data
+Only feature booleans are passed from extension storage into the Crunchyroll page. The isolated content script also handles fixed public ranking requests from the page, checking the stored opt-in before networking. No extension settings are included in AniList requests.
 
-CrOptix stores feature preferences, including design-related settings, in the browser's local extension storage. These settings are not sent to the developer. They remain until the user changes them, clears extension storage, or uninstalls the extension.
+## Optional AniList Trending
 
-## Crunchyroll services
+When you enable **AniList Trending** in the popup, public rankings replace Crunchyroll's popularity order. AniList receives a predefined GraphQL query, pagination values, and ordinary connection metadata such as your IP address and HTTP headers. Request origin and timing may indicate that you are using Crunchyroll or CrOptix.
 
-CrOptix runs on Crunchyroll and allows Crunchyroll's website and player to communicate with Crunchyroll and Sony services needed for playback, subtitles, images, account features, watch progress, and other requested functionality.
+The extension omits credentials and page referrers. It does not send AniList your account details, authorization headers, viewing history, current title, search terms, or extension preferences. Rankings and catalog mappings are cached only in the current page's memory.
 
-For AniList Trending, CrOptix may make an additional request to Crunchyroll's official content API to retrieve the Crunchyroll objects corresponding to the AniList ranking. Existing Crunchyroll authorization and anonymous-device headers may be reused only for that same-origin Crunchyroll request. They are never sent to AniList or the CrOptix developer.
+Turning AniList off prevents new ranking requests, cancels outstanding requests where possible, and clears those caches. Cancellation cannot recall a request that has already reached AniList. Crunchyroll's original popularity results are used when AniList is disabled or unavailable.
 
-Crunchyroll and Sony process these requests under their [privacy policies](https://help.crunchyroll.com/hc/en-us/articles/34292052724884-Data-Privacy).
+AniList processes connection information under its [privacy policy](https://www.iubenda.com/privacy-policy/909656).
 
-## AniList Trending
+## Crunchyroll playback and functional assets
 
-CrOptix uses public trending data from the AniList API to replace Crunchyroll's popularity order with the corresponding AniList ranking. This functionality is enabled by default and is part of CrOptix's operation.
+Crunchyroll/Sony services and their media delivery providers remain necessary for account access, playback, DRM, subtitles, localization, images, watch progress, and playback-session management. With AniList enabled, the extension also retrieves corresponding catalog objects from Crunchyroll's official API. Existing authorization headers are reused only for supported same-origin Crunchyroll catalog requests.
 
-When AniList Trending is used, the browser sends AniList:
+Subtitle rendering code, workers, WASM, and fonts are packaged with the extension. Selected subtitles and other functional media assets use URLs supplied by Crunchyroll. These may be hosted on media CDNs.
 
-* a predefined GraphQL query;
-* pagination values needed to load the public ranking; and
-* technical connection information normally present in a web request, such as the IP address and standard HTTP headers.
+The replacement player's registered plugins provide watch-progress reporting and playback-session keepalive. Bundled Mux/EEC code is not registered by this fork. The original Crunchyroll player may run when enhancements are disabled or a compatibility failure triggers fallback; its own network behavior remains governed by Crunchyroll.
 
-The request origin or timing may allow AniList to infer that Crunchyroll or CrOptix is being used.
+See [the data-flow review](docs/DATA_FLOW.md) for the audit boundary and remaining live-browser verification requirements. This fork does not claim to block all tracking by the Crunchyroll website or browser itself.
 
-CrOptix does not send AniList Crunchyroll account details, viewing history, the currently watched title, search terms, Crunchyroll authorization headers, AniList credentials, or extension settings. AniList requests use no cookies or credentials and no page referrer.
+## Control and retention
 
-AniList results are cached only in the current page's memory. They become stale after 15 minutes and are not placed in persistent extension storage or sent to the developer.
+You can change preferences in the popup, clear extension storage, or uninstall the extension. Reload open Crunchyroll pages after uninstalling or changing player enhancements. The developer receives no server-side user record to retain, sell, or delete.
 
-AniList and its infrastructure process connection data under the [AniList Privacy Policy](https://www.iubenda.com/privacy-policy/909656).
-
-## Data transmission and control
-
-AniList Trending is an integrated part of CrOptix and is active whenever the extension is in use. Using CrOptix therefore involves the AniList requests described above when the AniList Trending functionality is loaded or used.
-
-Users who do not want CrOptix to make these AniList requests can stop using or uninstall the extension.
-
-## Data sharing, sale, and retention
-
-The developer does not receive or retain the data described above. Data is sent only to Crunchyroll/Sony as required for Crunchyroll functionality and to AniList for the trending functionality.
-
-The developer does not sell data or use it for advertising, profiling, credit decisions, or unrelated purposes.
-
-## User choices and requests
-
-Users can clear CrOptix's local storage or uninstall CrOptix. Because the developer does not operate a collection server, the developer has no server-side user record to access or delete.
-
-Requests concerning data held by Crunchyroll/Sony or AniList must be directed to those services.
-
-Questions about this policy can be submitted through the [CrOptix support repository](https://github.com/stratumadev/croptix/issues). Do not include passwords, authentication tokens, or other sensitive information in a public issue.
-
-## Changes
-
-This policy will be updated when CrOptix's data practices change. The effective date at the top identifies the latest revision.
+Do not attach credentials, signed media URLs, cookies, or unredacted network captures to issues. Use the fork's issue tracker for extension questions and the respective service's privacy contact for information held by Crunchyroll or AniList.

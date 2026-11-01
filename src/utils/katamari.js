@@ -1,4 +1,21 @@
 ;(() => {
+    const marker = Symbol.for('croptix.katamari-page-patches')
+    if (window[marker]) return
+    window[marker] = true
+    // The player setting is a page-lifetime choice; changing it takes effect on reload.
+    let playerEnabled = false
+    let settingsReceived = false
+    document.addEventListener('croptix:settings', (event) => {
+        if (settingsReceived || typeof event.detail?.playerEnabled !== 'boolean') return
+        settingsReceived = true
+        playerEnabled = event.detail.playerEnabled
+        const chunks = window.webpackChunk_N_E
+        if (playerEnabled && Array.isArray(chunks)) {
+            for (const chunk of chunks) {
+                if (Array.isArray(chunk) && chunk.length >= 2) patch_webpack_chunk(chunk)
+            }
+        }
+    })
     const coreExportPatterns = {
         Ft: '(?:^|[^\\w$])CORE\\s*\\.\\s*(ID)\\s*\\.\\s*setLogLevel\\b\\s*\\(',
         xt: 'var\\s*ID\\s*=\\s*\\[\\s*\\.\\.\\.\\s*ID\\s*\\]\\s*,\\s*ID\\s*=\\s*\\(\\s*0\\s*,\\s*CORE\\s*\\.\\s*(ID)\\s*\\)\\s*\\(\\s*ID\\s*\\)\\s*,\\s*ID\\s*=\\s*\\(\\s*0\\s*,\\s*CORE\\s*\\.\\s*ID\\s*\\)\\s*\\(\\s*ID\\s*,\\s*1\\s*/\\s*0\\s*\\)\\s*;',
@@ -84,7 +101,56 @@
     }
     let patchFailed = false
 
+    function createPlayerBuilder(Builder, fallback, isDisabled) {
+        return class PlayerBuilder extends Builder {
+            constructor(...args) {
+                if (isDisabled()) return fallback(null, args)
+                try {
+                    super(...args)
+                } catch (error) {
+                    return fallback(error, args)
+                }
+                this._croptixArgs = args
+            }
+            setLogLevel(level) {
+                this.currentLogLevel = level
+                if (isDisabled() && !this._croptixOriginalBuilder) this._croptixOriginalBuilder = fallback(null, this._croptixArgs)
+                if (this._croptixOriginalBuilder) return this._croptixOriginalBuilder.setLogLevel(level)
+                try {
+                    return super.setLogLevel(level)
+                } catch (error) {
+                    this._croptixOriginalBuilder = fallback(error, this._croptixArgs)
+                    return this._croptixOriginalBuilder.setLogLevel(level)
+                }
+            }
+            async build(...args) {
+                if (this._croptixOriginalBuilder || isDisabled()) {
+                    this._croptixOriginalBuilder ||= fallback(null, this._croptixArgs)
+                    this._croptixOriginalBuilder.setLogLevel(this.currentLogLevel)
+                    return this._croptixOriginalBuilder.build(...args)
+                }
+                const build = { layers: [], mediaEngine: null }
+                this._croptixBuildContext = build
+                try {
+                    return await super.build(...args)
+                } catch (error) {
+                    try {
+                        if (typeof build.mediaEngine?.destroy === 'function') await build.mediaEngine.destroy()
+                        else await build.mediaEngine?.dispose?.()
+                    } catch {}
+                    for (const child of build.layers) child.remove()
+                    this._croptixOriginalBuilder = fallback(error, this._croptixArgs)
+                    this._croptixOriginalBuilder.setLogLevel(this.currentLogLevel)
+                    return this._croptixOriginalBuilder.build(...args)
+                } finally {
+                    if (this._croptixBuildContext === build) this._croptixBuildContext = null
+                }
+            }
+        }
+    }
+
     function patch_webpack_chunk(chunk_data) {
+        if (!playerEnabled) return
         try {
             const modules = chunk_data[1]
             if (!modules) return
@@ -17216,7 +17282,7 @@
                     })(shakaE, shakaB, bitE, bitB, importIds, coreExportMap, playerExport)
 
                     modules[module_id] = function (t, i, a) {
-                        if (patchFailed) return fn(t, i, a)
+                        if (patchFailed || !playerEnabled) return fn(t, i, a)
                         try {
                             const patchedModule = { exports: {} }
                             patchedFactory(patchedModule, patchedModule.exports, a)
@@ -17232,51 +17298,7 @@
                                 }
                                 return new OriginalBuilder(...args)
                             }
-                            class PlayerBuilder extends Builder {
-                                constructor(...args) {
-                                    if (patchFailed) return fallback(null, args)
-                                    try {
-                                        super(...args)
-                                    } catch (error) {
-                                        return fallback(error, args)
-                                    }
-                                    this._croptixArgs = args
-                                }
-                                setLogLevel(level) {
-                                    this.currentLogLevel = level
-                                    if (patchFailed && !this._croptixOriginalBuilder) this._croptixOriginalBuilder = fallback(null, this._croptixArgs)
-                                    if (this._croptixOriginalBuilder) return this._croptixOriginalBuilder.setLogLevel(level)
-                                    try {
-                                        return super.setLogLevel(level)
-                                    } catch (error) {
-                                        this._croptixOriginalBuilder = fallback(error, this._croptixArgs)
-                                        return this._croptixOriginalBuilder.setLogLevel(level)
-                                    }
-                                }
-                                async build(...args) {
-                                    if (this._croptixOriginalBuilder || patchFailed) {
-                                        this._croptixOriginalBuilder ||= fallback(null, this._croptixArgs)
-                                        this._croptixOriginalBuilder.setLogLevel(this.currentLogLevel)
-                                        return this._croptixOriginalBuilder.build(...args)
-                                    }
-                                    const build = { layers: [], mediaEngine: null }
-                                    this._croptixBuildContext = build
-                                    try {
-                                        return await super.build(...args)
-                                    } catch (error) {
-                                        try {
-                                            if (typeof build.mediaEngine?.destroy === 'function') await build.mediaEngine.destroy()
-                                            else await build.mediaEngine?.dispose?.()
-                                        } catch {}
-                                        for (const child of build.layers) child.remove()
-                                        this._croptixOriginalBuilder = fallback(error, this._croptixArgs)
-                                        this._croptixOriginalBuilder.setLogLevel(this.currentLogLevel)
-                                        return this._croptixOriginalBuilder.build(...args)
-                                    } finally {
-                                        if (this._croptixBuildContext === build) this._croptixBuildContext = null
-                                    }
-                                }
-                            }
+                            const PlayerBuilder = createPlayerBuilder(Builder, fallback, () => patchFailed || !playerEnabled)
                             a.d(i, { [playerExport]: () => PlayerBuilder })
                         } catch (error) {
                             patchFailed = true
@@ -17305,28 +17327,25 @@
     }
 
     let is_patching = false
-    let current_push = Array.prototype.push
+    let current_push = typeof chunk_array.push === 'function' ? chunk_array.push : Array.prototype.push
+    const patched_push = function (...args) {
+        if (is_patching) return Array.prototype.push.apply(this, args)
+        is_patching = true
+        try {
+            for (const chunk_data of args) patch_webpack_chunk(chunk_data)
+            return current_push.apply(this, args)
+        } finally {
+            is_patching = false
+        }
+    }
     Object.defineProperty(chunk_array, 'push', {
         configurable: true,
         get() {
-            return function (...args) {
-                if (is_patching) {
-                    return Array.prototype.push.apply(this, args)
-                }
-
-                is_patching = true
-                try {
-                    for (const chunk_data of args) {
-                        patch_webpack_chunk(chunk_data)
-                    }
-                    return current_push.apply(this, args)
-                } finally {
-                    is_patching = false
-                }
-            }
+            return patched_push
         },
         set(new_push) {
-            current_push = new_push
+            if (typeof new_push === 'function' && new_push !== patched_push) current_push = new_push
         }
     })
+    document.dispatchEvent(new Event('croptix:settings-request'))
 })()

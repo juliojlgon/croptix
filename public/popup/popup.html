@@ -1,17 +1,23 @@
 <!doctype html>
-<html>
+<html lang="en">
     <head>
         <meta charset="UTF-8" />
+        <title>CrOptix settings</title>
         <link rel="stylesheet" href="popup.css" />
     </head>
     <body>
-        <div class="popup">
+        <main class="popup">
             <h2>CrOptix</h2>
-            <label class="switch">
-                <input type="checkbox" id="toggleDesign" />
-                <span>Enable Design Changes</span>
-            </label>
-        </div>
+            <label class="switch"><input type="checkbox" id="toggleDesign" disabled /><span>Design changes</span></label>
+            <label class="switch"><input type="checkbox" id="togglePlayer" aria-describedby="playerHelp" disabled /><span>Player enhancements</span></label>
+            <p id="playerHelp" class="help">Reload Crunchyroll after changing player enhancements.</p>
+            <label class="switch"><input type="checkbox" id="toggleAniList" aria-describedby="aniListHelp" disabled /><span>AniList Trending</span></label>
+            <p id="aniListHelp" class="help"
+                >Optional. Loads public rankings from AniList, which receives your IP address and connection metadata. No account details, viewing history, credentials, or page
+                referrer are sent.</p
+            >
+            <p id="settingsStatus" class="status" role="status" aria-live="polite"></p>
+        </main>
         <script src="popup.js"></script>
     </body>
 </html>

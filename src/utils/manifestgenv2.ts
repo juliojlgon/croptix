@@ -15,7 +15,7 @@ async function generateManifest() {
         version: version,
         description: 'Crunchyroll improvements and fixes',
         homepage_url: 'https://github.com/stratumadev/croptix',
-        permissions: ['storage', 'webRequest', 'webRequestBlocking', '*://*.crunchyroll.com/*'],
+        permissions: ['storage', '*://*.crunchyroll.com/*'],
         icons: {
             '16': 'icons/icon_16x16.png',
             '32': 'icons/icon_32x32.png',
