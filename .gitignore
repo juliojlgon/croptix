@@ -10,6 +10,8 @@ build
 # code coverage
 coverage
 *.lcov
+test-results
+playwright-report
 
 # logs
 logs

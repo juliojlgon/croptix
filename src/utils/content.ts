@@ -1,51 +1,135 @@
 import browser from './browser'
-// import { CrunchyAuth } from '../types/crunchy'
+
+type PageSettings = { aniListEnabled: boolean; playerEnabled: boolean }
+let page_settings: PageSettings | null = null
+let settings_revision = 0
 let crunchyroll_observer: MutationObserver | null = null
-// let crunchyroll_listener: ((e: MessageEvent) => void) | null = null
+let mutation_timer: ReturnType<typeof setTimeout> | null = null
 let focused_player_element: HTMLElement | null = null
+const added_tabindexes = new Set<HTMLElement>()
+const ani_list_requests = new Map<string, AbortController>()
+const ani_list_query = `query ($firstPage: Int!, $secondPage: Int!) {
+    first: Page(page: $firstPage, perPage: 50) {
+        media(type: ANIME, sort: TRENDING_DESC, isAdult: false) { externalLinks { url } }
+    }
+    second: Page(page: $secondPage, perPage: 50) {
+        media(type: ANIME, sort: TRENDING_DESC, isAdult: false) { externalLinks { url } }
+    }
+}`
 
-// let tv_auth: boolean = false
-// let tv_auth_running: boolean = false
-// let tv_auth_refresh_running: boolean = false
+function cancel_ani_list_requests() {
+    for (const controller of ani_list_requests.values()) controller.abort()
+    ani_list_requests.clear()
+}
 
-const s = document.createElement('script')
-s.src = browser.runtime.getURL('config_init.js')
-s.dataset.baseUrl = browser.runtime.getURL('')
-;(document.head || document.documentElement).appendChild(s)
+function send_ani_list_result(id: string, ok: boolean, data?: unknown) {
+    document.dispatchEvent(new CustomEvent('croptix:anilist-response', { detail: { id, ok, ...(ok ? { data } : {}) } }))
+}
+
+function valid_request_id(id: unknown): id is string {
+    return typeof id === 'string' && /^[\w-]{1,64}$/.test(id)
+}
+
+// MAIN-world events are public. Only isolated-world storage can grant consent;
+// callers cannot choose a URL, query, headers, credentials or request body.
+document.addEventListener('croptix:anilist-request', (event) => {
+    const detail = (event as CustomEvent).detail
+    const id: unknown = detail?.id
+    if (!valid_request_id(id)) return
+    const firstPage: unknown = detail?.firstPage
+    const secondPage: unknown = detail?.secondPage
+    if (
+        !page_settings?.aniListEnabled ||
+        ani_list_requests.size !== 0 ||
+        typeof firstPage !== 'number' ||
+        !Number.isInteger(firstPage) ||
+        firstPage < 1 ||
+        firstPage > 10 ||
+        typeof secondPage !== 'number' ||
+        !Number.isInteger(secondPage) ||
+        secondPage < 1 ||
+        secondPage > 10
+    ) {
+        send_ani_list_result(id, false)
+        return
+    }
+    const controller = new AbortController()
+    ani_list_requests.set(id, controller)
+    const timer = setTimeout(() => controller.abort(), 5000)
+    void (async () => {
+        try {
+            const settings = await browser.storage.local.get('aniListEnabled')
+            if (settings.aniListEnabled !== true || !page_settings?.aniListEnabled || controller.signal.aborted) throw new Error('Disabled')
+            const response = await fetch('https://graphql.anilist.co', {
+                method: 'POST',
+                credentials: 'omit',
+                referrerPolicy: 'no-referrer',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ query: ani_list_query, variables: { firstPage, secondPage } }),
+                signal: controller.signal
+            })
+            if (!response.ok) throw new Error('Unavailable')
+            const json = await response.json()
+            if (json.errors?.length || controller.signal.aborted || !page_settings?.aniListEnabled) throw new Error('Unavailable')
+            const cleanPage = (page: unknown) => {
+                const media = (page as { media?: unknown })?.media
+                if (!Array.isArray(media) || media.length > 50) throw new Error('Invalid ranking')
+                return {
+                    media: media.map((item) => ({
+                        externalLinks: Array.isArray(item?.externalLinks)
+                            ? item.externalLinks
+                                  .slice(0, 100)
+                                  .filter((link: { url?: unknown }) => typeof link?.url === 'string' && link.url.length <= 2048)
+                                  .map((link: { url: string }) => ({ url: link.url }))
+                            : []
+                    }))
+                }
+            }
+            send_ani_list_result(id, true, { first: cleanPage(json.data?.first), second: cleanPage(json.data?.second) })
+        } catch {
+            send_ani_list_result(id, false)
+        } finally {
+            clearTimeout(timer)
+            if (ani_list_requests.get(id) === controller) ani_list_requests.delete(id)
+        }
+    })()
+})
+document.addEventListener('croptix:anilist-cancel', (event) => {
+    const id: unknown = (event as CustomEvent).detail?.id
+    if (valid_request_id(id)) ani_list_requests.get(id)?.abort()
+})
+
+function publish_settings() {
+    if (page_settings) document.dispatchEvent(new CustomEvent('croptix:settings', { detail: { ...page_settings } }))
+}
+
+// MAIN-world scripts may start before or after extension storage resolves.
+document.addEventListener('croptix:settings-request', publish_settings)
+
+const config = document.createElement('script')
+config.src = browser.runtime.getURL('config_init.js')
+config.dataset.baseUrl = browser.runtime.getURL('')
+config.addEventListener('load', () => config.remove(), { once: true })
+;(document.head || document.documentElement).appendChild(config)
 
 function is_mobile_or_tablet() {
     const user_agent_data = (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData
-
-    if (user_agent_data?.mobile) return true
-
-    const mobile_user_agent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet/i.test(navigator.userAgent)
-    const ipad_desktop_mode = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1
-
-    return mobile_user_agent || ipad_desktop_mode
+    return Boolean(
+        user_agent_data?.mobile ||
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet/i.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    )
 }
 
 if (is_mobile_or_tablet()) {
     const script = document.createElement('script')
     script.src = browser.runtime.getURL('mobile-fix.js')
+    script.addEventListener('load', () => script.remove(), { once: true })
     ;(document.head || document.documentElement).appendChild(script)
-    script.remove()
-}
-
-// Throttle utility - limits function execution to once per interval
-function throttle<T extends (...args: unknown[]) => void>(fn: T, ms: number): T {
-    let lastCall = 0
-    return ((...args: unknown[]) => {
-        const now = Date.now()
-        if (now - lastCall >= ms) {
-            lastCall = now
-            fn(...args)
-        }
-    }) as T
 }
 
 function is_text_input_active() {
     const active_element = document.activeElement
-
     return (
         active_element instanceof HTMLInputElement ||
         active_element instanceof HTMLTextAreaElement ||
@@ -54,90 +138,98 @@ function is_text_input_active() {
     )
 }
 
-// Focusing Katamari for hotkeys to work properly
-function focus_crunchyroll_player() {
+function focus_crunchyroll_player(player_container: HTMLElement) {
     if (is_text_input_active()) return
-
-    const player_container = document.querySelector<HTMLElement>('#player-container, .player-container')
-    const player_focus_target = player_container?.children[1] as HTMLElement | undefined
-    const focus_target = player_focus_target ?? player_container
-
-    if (!focus_target || focused_player_element === focus_target || document.activeElement === focus_target) return
-
+    const focus_target = (player_container.children[1] as HTMLElement | undefined) ?? player_container
+    // Preserve deliberate focus on links, buttons, dialogs and other player controls.
+    const active = document.activeElement
+    if (active && active !== document.body && active !== document.documentElement && active !== focused_player_element) return
+    if (focused_player_element === focus_target || active === focus_target) return
     if (!focus_target.hasAttribute('tabindex')) {
         focus_target.tabIndex = -1
+        added_tabindexes.add(focus_target)
     }
-
     focus_target.focus({ preventScroll: true })
     focused_player_element = focus_target
 }
 
-// Observer Main - throttled to max 10 executions per second
-function start_observe_crunchyroll() {
-    if (crunchyroll_observer) return
-
-    const katamari = document.querySelector('.player-container')
-    const player_wrapper = document.querySelector('video-player-wrapper')
-    if (katamari) {
-        document.documentElement.classList.add('croptix-player')
-        if (player_wrapper) {
-            player_wrapper.classList.add('croptix-katamari')
-        }
-        focus_crunchyroll_player()
-    } else {
-        document.documentElement.classList.remove('croptix-player')
-        focused_player_element = null
+function update_player() {
+    const player = document.querySelector<HTMLElement>('#player-container, .player-container')
+    document.documentElement.classList.toggle('croptix-player', Boolean(player))
+    for (const wrapper of document.querySelectorAll('video-player-wrapper')) {
+        wrapper.classList.toggle('croptix-katamari', Boolean(player))
     }
-
-    const handle_crunchyroll_mutation = throttle(() => {
-        // Player Class Toggle
-        const katamari = document.querySelector('.player-container')
-        const player_wrapper = document.querySelector('video-player-wrapper')
-        if (katamari) {
-            document.documentElement.classList.add('croptix-player')
-            if (player_wrapper) {
-                player_wrapper.classList.add('croptix-katamari')
-            }
-            focus_crunchyroll_player()
-        } else {
-            document.documentElement.classList.remove('croptix-player')
-            focused_player_element = null
+    for (const element of added_tabindexes) {
+        if (!element.isConnected) {
+            element.removeAttribute('tabindex')
+            added_tabindexes.delete(element)
         }
-    }, 100)
-
-    crunchyroll_observer = new MutationObserver(handle_crunchyroll_mutation)
-    crunchyroll_observer.observe(document.documentElement, {
-        childList: true,
-        subtree: true
-    })
+    }
+    if (player) focus_crunchyroll_player(player)
+    else focused_player_element = null
 }
 
-// Remove Crunchyroll observer
-function stop_observe_crunchyroll() {
-    if (crunchyroll_observer) {
-        crunchyroll_observer.disconnect()
-        crunchyroll_observer = null
-    }
+function start_observe_crunchyroll() {
+    if (crunchyroll_observer) return
+    update_player()
+    // Coalesce bursts without dropping the final mutation.
+    crunchyroll_observer = new MutationObserver(() => {
+        if (mutation_timer !== null) return
+        mutation_timer = setTimeout(() => {
+            mutation_timer = null
+            update_player()
+        }, 100)
+    })
+    crunchyroll_observer.observe(document.documentElement, { childList: true, subtree: true })
+}
 
+function stop_observe_crunchyroll() {
+    crunchyroll_observer?.disconnect()
+    crunchyroll_observer = null
+    if (mutation_timer !== null) clearTimeout(mutation_timer)
+    mutation_timer = null
     document.documentElement.classList.remove('croptix-player')
+    for (const wrapper of document.querySelectorAll('.croptix-katamari')) wrapper.classList.remove('croptix-katamari')
+    for (const element of added_tabindexes) element.removeAttribute('tabindex')
+    added_tabindexes.clear()
+    focused_player_element = null
 }
 
 async function load_settings() {
-    // Load settings
-    const settings = await browser.storage.local.get(['designEnabled', 'tvAuthEnabled'])
-
-    const crunchyroll_design = settings.designEnabled !== false
-    if (crunchyroll_design) {
-        // Inject custom design
-        document.documentElement.classList.add('croptix')
-        // Start custom player design listener
-        start_observe_crunchyroll()
-    } else {
-        document.documentElement.classList.remove('croptix')
-        // Stop custom player design listener
-        stop_observe_crunchyroll()
+    const revision = ++settings_revision
+    try {
+        const settings = await browser.storage.local.get(['designEnabled', 'aniListEnabled', 'playerEnabled'])
+        if (revision !== settings_revision) return
+        page_settings = {
+            aniListEnabled: settings.aniListEnabled === true,
+            // Replacing an active player is unsafe: changes take effect after reload.
+            playerEnabled: page_settings?.playerEnabled ?? settings.playerEnabled !== false
+        }
+        document.documentElement.classList.toggle('croptix', settings.designEnabled !== false)
+        if (settings.designEnabled !== false && page_settings.playerEnabled) start_observe_crunchyroll()
+        else stop_observe_crunchyroll()
+        publish_settings()
+    } catch {
+        // Fail closed for optional networking; retry on a later storage change.
+        if (revision !== settings_revision) return
+        page_settings = { aniListEnabled: false, playerEnabled: page_settings?.playerEnabled ?? false }
+        cancel_ani_list_requests()
+        publish_settings()
     }
 }
 
-load_settings()
-browser.storage.onChanged.addListener(load_settings)
+void load_settings()
+browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return
+    if ('aniListEnabled' in changes && changes.aniListEnabled.newValue !== true) {
+        if (page_settings) page_settings.aniListEnabled = false
+        cancel_ani_list_requests()
+        publish_settings()
+    }
+    if (['designEnabled', 'aniListEnabled', 'playerEnabled'].some((key) => key in changes)) void load_settings()
+})
+window.addEventListener('pagehide', () => {
+    stop_observe_crunchyroll()
+    cancel_ani_list_requests()
+})
+window.addEventListener('pageshow', () => void load_settings())

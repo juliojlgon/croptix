@@ -15,7 +15,7 @@ async function generateManifest() {
         version: version,
         description: 'Crunchyroll improvements and fixes',
         homepage_url: 'https://github.com/stratumadev/croptix',
-        permissions: ['storage', 'declarativeNetRequest'],
+        permissions: ['storage'],
         host_permissions: ['*://www.crunchyroll.com/*'],
         web_accessible_resources: [
             {
@@ -23,17 +23,21 @@ async function generateManifest() {
                 matches: ['*://www.crunchyroll.com/*']
             }
         ],
-        browser_specific_settings: {
-            gecko: {
-                id: '{bc118c9c-5c07-4347-b502-657d03d87065}',
-                strict_min_version: '142.0',
-                data_collection_permissions: {
-                    required: ['none'],
-                    optional: ['browsingActivity', 'technicalAndInteraction']
-                }
-            },
-            gecko_android: { strict_min_version: '142.0' }
-        },
+        ...(process.env.CROPTIX_BROWSER === 'chrome'
+            ? {}
+            : {
+                  browser_specific_settings: {
+                      gecko: {
+                          id: '{bc118c9c-5c07-4347-b502-657d03d87065}',
+                          strict_min_version: '142.0',
+                          data_collection_permissions: {
+                              required: ['none'],
+                              optional: ['browsingActivity', 'technicalAndInteraction']
+                          }
+                      },
+                      gecko_android: { strict_min_version: '142.0' }
+                  }
+              }),
         icons: {
             '16': 'icons/icon_16x16.png',
             '32': 'icons/icon_32x32.png',
